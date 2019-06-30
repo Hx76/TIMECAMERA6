@@ -3,6 +3,7 @@ package com.example.timecamera;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.ContentResolver;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
@@ -11,12 +12,15 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.StrictMode;
 import android.provider.MediaStore;
+import android.util.Log;
 import android.view.View;
 import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.Toast;
 
+import androidx.annotation.RequiresApi;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
@@ -32,36 +36,29 @@ import static android.content.pm.PackageManager.PERMISSION_GRANTED;
 public class FootActivity extends Activity {
     private ImageView mimageview;
     private static int REQ = 1;
-    private Uri imageUri;
+    private static int REQ2 = 2;
+    private String mFilePaths;
+    @RequiresApi(api = Build.VERSION_CODES.M-1)
+    void Request() {             //获取相机拍摄读写权限
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {//版本判断
+            if (checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.READ_EXTERNAL_STORAGE,
+                        Manifest.permission.WRITE_EXTERNAL_STORAGE,Manifest.permission.CAMERA}, 1);
+            }
+        }
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_foot);
         mimageview = findViewById(R.id.imageView);
-        Button takephoto = (Button) findViewById(R.id.capture);
-        takephoto.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
-                File outputImage = new File(getExternalCacheDir(),"outputImage.jpg");
-                try {
-                if (outputImage.exists()) {
-                    outputImage.delete();
-                }
-                    outputImage.createNewFile();
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
-                if (Build.VERSION.SDK_INT >= 24) {
-                    imageUri = FileProvider.getUriForFile(FootActivity.this,"com.example.timecamera.fileprovider",outputImage);
-                }else {
-                    imageUri = Uri.fromFile(outputImage);
-                }
-                Intent intent = new Intent("android.media.action.IMAGE_CAPTURE");
-                intent.putExtra(MediaStore.EXTRA_OUTPUT,imageUri);
-                startActivityForResult(intent,1);
-            }
-        });
+        mFilePaths = Environment.getExternalStorageDirectory().getPath();
+        mFilePaths = mFilePaths + "/" + "temp.png";
+        Request();
+        StrictMode.VmPolicy.Builder builder = new StrictMode.VmPolicy.Builder();
+        StrictMode.setVmPolicy(builder.build());
+        builder.detectFileUriExposure();
     }
 
 
@@ -73,31 +70,65 @@ public class FootActivity extends Activity {
 
     public void takephoto(View view) {
         Intent intent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+        Uri photoUri = Uri.fromFile(new File(mFilePaths));
+        intent.putExtra(MediaStore.EXTRA_OUTPUT,photoUri);
         startActivityForResult(intent,REQ);
     }
-    public void select(View view) {
-        Intent intent = new Intent(Intent.ACTION_PICK,
-                android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI);//调用android的图库
-        startActivityForResult(intent,REQ);
+
+    public void select(View view){
+        //intent可以应用于广播和发起意图，其中属性有：ComponentName,action,data等
+        Intent intent=new Intent();
+        intent.setType("image/*");
+        //action表示intent的类型，可以是查看、删除、发布或其他情况；我们选择ACTION_GET_CONTENT，系统可以根据Type类型来调用系统程序选择Type
+        //类型的内容给你选择
+        intent.setAction(Intent.ACTION_GET_CONTENT);
+        //如果第二个参数大于或等于0，那么当用户操作完成后会返回到本程序的onActivityResult方法
+        startActivityForResult(intent, REQ2);
     }
+    /**
+     *把用户选择的图片显示在imageview中
+     */
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        switch (requestCode) {
-            case 1:
-                if (resultCode == RESULT_OK ) {
+        if(resultCode == RESULT_OK) {
+           FileInputStream fis = null;
+            if (requestCode == REQ) {
+                try {
+                    fis = new FileInputStream(mFilePaths);
+                    Bitmap bitmap = BitmapFactory.decodeStream(fis);
+                    mimageview.setImageBitmap(bitmap);
+                } catch (FileNotFoundException e) {
+                    e.printStackTrace();
+                }finally {
                     try {
-                        Bitmap bitmap = BitmapFactory.decodeStream(getContentResolver().openInputStream(imageUri));
-                        mimageview.setImageBitmap(bitmap);
-                    } catch (FileNotFoundException e) {
+                        fis.close();
+                    } catch (IOException e) {
                         e.printStackTrace();
                     }
                 }
-                break;
-            default:
-                break;
+            }
+            if (requestCode == REQ2) {
+                //获取选中文件的定位符
+                Uri uri = data.getData();
+                Log.e("uri", uri.toString());
+                //使用content的接口
+                ContentResolver cr = this.getContentResolver();
+                try {
+                    //获取图片
+                    Bitmap bitmap = BitmapFactory.decodeStream(cr.openInputStream(uri));
+                    mimageview.setImageBitmap(bitmap);
+                } catch (FileNotFoundException e) {
+                    Log.e("Exception", e.getMessage(),e);
+                }
+            }else{
+                //操作错误或没有选择图片
+                Log.i("FootActivity", "operation error");
+            }
+            }
         }
     }
-}
+
+
 
